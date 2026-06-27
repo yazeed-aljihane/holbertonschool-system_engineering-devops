@@ -1,0 +1,65 @@
+User
+  |
+  | HTTPS: www.foobar.com
+  v
+DNS
+  |
+  | A record -> Virtual IP: 8.8.8.8
+  v
++--------------------------------------------------+
+| HAProxy Cluster                                  |
+|                                                  |
+| Server 1: HAProxy 01        Server 2: HAProxy 02 |
+| Active Load Balancer        Passive / Standby     |
+| Firewall + Monitoring       Firewall + Monitoring |
+|                                                  |
+| Keepalived / VRRP manages the Virtual IP         |
++--------------------------------------------------+
+                         |
+                         | Load-balanced HTTP/HTTPS traffic
+                         v
++----------------------------+  +----------------------------+
+| Server 3: Web Server 01    |  | Server 4: Web Server 02    |
+| Nginx                      |  | Nginx                      |
+| Firewall + Monitoring      |  | Firewall + Monitoring      |
++----------------------------+  +----------------------------+
+              |                              |
+              +--------------+---------------+
+                             |
+                             v
++----------------------------+  +----------------------------+
+| Server 5: Application 01   |  | Server 6: Application 02   |
+| Application Server         |  | Application Server         |
+| Application Files          |  | Application Files          |
+| Firewall + Monitoring      |  | Firewall + Monitoring      |
++----------------------------+  +----------------------------+
+              |                              |
+              +--------------+---------------+
+                             |
+                 Writes      |      Reads
+                             v
++----------------------------+  +----------------------------+
+| Server 7: MySQL Primary    |->| Server 8: MySQL Replica    |
+| Read and Write Queries     |  | Read-Only Queries          |
+| Firewall + Monitoring      |  | Firewall + Monitoring      |
++----------------------------+  +----------------------------+
+
+The two HAProxy servers form a high-availability cluster. HAProxy 01 is active and receives traffic through the virtual IP address. HAProxy 02 is passive and monitors the active load balancer. If HAProxy 01 fails, HAProxy 02 takes ownership of the virtual IP and continues receiving traffic.
+
+I add the second load balancer to remove the load balancer as a single point of failure.
+
+I split the web layer into two Nginx servers. Nginx receives HTTP or HTTPS requests from the load balancer, serves static files such as CSS, JavaScript, and images, and forwards dynamic requests to the application servers. Having two web servers allows this layer to scale independently.
+
+I split the application layer into two application servers. These servers run the application code and business logic. They process dynamic requests, validate data, communicate with MySQL, and return responses to Nginx. The application server can be Gunicorn for a Python application or Node.js for a JavaScript application.
+
+I move the application files to the application servers because the application servers execute the code base.
+
+I split the database layer into dedicated MySQL servers. The MySQL Primary accepts write queries such as INSERT, UPDATE, and DELETE. The MySQL Replica receives replicated data from the Primary and can serve read-only queries, backups, or reporting workloads.
+
+This architecture allows each layer to scale independently. For example, high traffic on static files can be handled by adding web servers without adding database servers. High CPU usage from business logic can be handled by adding application servers without changing the web layer.
+
+The firewalls and monitoring agents from the previous design remain on every server. Public traffic should reach only the load balancer. Web servers should accept traffic only from the load balancers, application servers only from web servers, and MySQL servers only from application servers.
+
+HTTPS should remain encrypted between layers. HAProxy can either use TLS passthrough so Nginx terminates HTTPS, or decrypt and re-encrypt traffic before forwarding it to the web servers.
+
+The web server and application server have different responsibilities. The web server handles HTTP connections, static files, and reverse proxying. The application server executes the code and contains the business logic.
